@@ -64,10 +64,10 @@ def valid_path(directory: str) -> Path:
     return directory_path
 
 
-def formatted_apk_name(apk: APK) -> str: return f'{apk.get_app_name()}_v{apk.version_name}.apk'
+def formatted_apk_name(apk: APK) -> str: return f'{apk.get_app_name()}_v{apk.version_code}.apk'
 
 
-def formatted_apk_name_from_meta(meta: ApkMetadata) -> str: return f'{meta[2]}_v{meta[3]}.apk'
+def formatted_apk_name_from_meta(meta: ApkMetadata) -> str: return f'{meta[2]}_v{meta[0]}.apk'
 
 
 def apk_applier(list_apk: List[Path], function: Callable[[APK], Any], ):
@@ -88,22 +88,27 @@ def apk_applier(list_apk: List[Path], function: Callable[[APK], Any], ):
 def extract_icon_io(apk: APK, max_dpi=640) -> str:
     """Extracts an apk image to the filesystem
     and creates a naive cache of images for optimization of incremental runs"""
-    apk_name = apk.get_app_name()
-    image_name = f"{apk_name}.png"
-    image_path = Path(BASE_DIR, 'app_icon', )
-    image_path.mkdir(parents=True, exist_ok=True)
-    image = apk.get_file(apk.get_app_icon(max_dpi=max_dpi))
 
     try:
+        apk_name = apk.get_app_name()
+        image_name = f"{apk_name}.png"
+        image_path = Path(BASE_DIR, 'app_icon', )
+        image_path.mkdir(parents=True, exist_ok=True)
+        image = apk.get_file(apk.get_app_icon(max_dpi=max_dpi))
+
         pillow_image = Image.open(BytesIO(image))
         pillow_image.verify()
 
-    except(IOError, SyntaxError, ValueError) as e:
-        log.error(f"IMAGE IS NOT VALID {image_name} \n {e.__cause__}")
-        pass
-    with open(Path(image_path,image_name), 'wb')as output:
-        log.info('writing image to ' + str(image_path))
-        output.write(image)
+    except Exception as e:
+        log.error(f"IMAGE IS NOT VALID {apk.filename} \n {e.__cause__}")
+        return apk.filename
+    try:
+        with open(Path(image_path, image_name), 'wb')as output:
+            log.info('writing image to ' + str(image_path))
+            output.write(image)
+    except Exception as e:
+        log.warning(f'could not save image for {image_name}')
+        log.error(e)
     return image_name
 
 
@@ -117,14 +122,21 @@ def get_library(list_apk: List[Path]) -> ApkLibrary:
         print('No apk files found ')
         return {}
     library = {}
-
+    total = len(list_apk)
+    counter = 0
     for apk_path in list_apk:
         apk = APK(str(apk_path))
-
+        try:
+            meta = get_meta_from_apk(apk)
+        except Exception as e:
+            log.error(e)
+            continue
         if apk.package not in library:
-            library[apk.package] = [get_meta_from_apk(apk)]
+            library[apk.package] = [meta]
         else:
-            library[apk.package].append(get_meta_from_apk(apk))
+            library[apk.package].append(meta)
+        counter += 1
+        print(f'{counter / total * 100}%')
     return library
 
 
@@ -167,18 +179,21 @@ def renamer(apk_lib: ApkLibrary, delete_duplicates=False, delete_old_versions=Fa
                 if delete_old_versions:
                     path.unlink()
                     continue
-            path.rename(new_path)
-
+            try:
+                path.rename(new_path)
+            except Exception as e:
+                print(f'error with {new_path}')
+                log.error(e)
     print(f"Old versions => {old_counter}\nDuplicate versions => {dupe_counter} ")
 
 
 if __name__ == '__main__':
     # the folder variable should have apk files inside it
-    BASE_DIR = '/home/croxx/Templates/apk_killzone_3/'
+    BASE_DIR = "/run/media/croxx/System/3uTools/apks/APK's/"
     list_of_paths_to_apks = files_by_extension(BASE_DIR, '.apk')
     # use case 1: rename and organize apks marking old and duplicates
-    lib = get_library(list_of_paths_to_apks)
-    renamer(lib)
+    # lib = get_library(list_of_paths_to_apks)
+    # renamer(lib)
     # use case 2: extract images
     list_of_paths_to_apks = files_by_extension(BASE_DIR, '.apk')
     # ray notice how the second parameter is a function but without calling it with the parenthesis at the end
